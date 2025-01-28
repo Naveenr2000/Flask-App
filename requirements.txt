@@ -1,0 +1,6 @@
+Flask
+google-cloud-speech
+google-cloud-texttospeech
+Werkzeug
+librosa
+noisereduce
