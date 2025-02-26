@@ -1,162 +1,166 @@
-// Select DOM elements
 const recordButton = document.getElementById('record');
 const stopButton = document.getElementById('stop');
-const convertToTextButton = document.getElementById('convertToText');
 const audioElement = document.getElementById('audio');
-const textToSpeechButton = document.getElementById('textToSpeech');
+const textToSpeechForm = document.getElementById('textToSpeechForm');
 const textInput = document.getElementById('textInput');
-const progressBar = document.getElementById('progressBar');
+const ttsAudio = document.getElementById('ttsAudio');
 const timerDisplay = document.getElementById('timer');
+const audioList = document.getElementById('audioList');
+const transcriptionList = document.getElementById('transcriptionList');
+const sentimentResultDisplay = document.getElementById('sentimentResult');  // New element to display sentiment
 
 let mediaRecorder;
 let audioChunks = [];
 let startTime;
 let timerInterval;
 
-// Format time for the timer
-function formatTime(time) {
-    const minutes = Math.floor(time / 60);
-    const seconds = Math.floor(time % 60);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-}
-
-// Request microphone permissions and start recording
-async function startRecording() {
+// ✅ **Fixing Microphone Issue**: Use WebM format
+recordButton.addEventListener('click', async () => {
     try {
-        // Request microphone permission
+        console.log("Requesting microphone access...");
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const source = audioContext.createMediaStreamSource(stream);
+        mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" }); // ✅ WebM for better browser support
 
-        // Create and apply lowpass filter for noise reduction
-        const filter = audioContext.createBiquadFilter();
-        filter.type = "lowpass";
-        filter.frequency.value = 5000;
+        audioChunks = [];
+        mediaRecorder.ondataavailable = event => {
+            audioChunks.push(event.data);
+        };
 
-        source.connect(filter);
-        filter.connect(audioContext.destination);
-
-        mediaRecorder = new MediaRecorder(stream);
         mediaRecorder.start();
-
         startTime = Date.now();
-        let elapsedTime = 0;
         timerInterval = setInterval(() => {
-            elapsedTime = Math.floor((Date.now() - startTime) / 1000);
-            timerDisplay.textContent = formatTime(elapsedTime);
-
-            // Update progress bar
-            const progress = Math.min(elapsedTime / 60, 1); // 1 minute max recording
-            progressBar.style.width = `${progress * 100}%`;
+            const elapsedTime = Math.floor((Date.now() - startTime) / 1000);
+            timerDisplay.textContent = `Recording: ${formatTime(elapsedTime)}`;
         }, 1000);
 
-        mediaRecorder.ondataavailable = e => {
-            audioChunks.push(e.data);
-        };
+        recordButton.disabled = true;
+        stopButton.disabled = false;
+        timerDisplay.textContent = "Recording...";
 
-        mediaRecorder.onstop = () => {
-            clearInterval(timerInterval); // Stop the timer
-            const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-            const formData = new FormData();
-            formData.append('audio_data', audioBlob, 'recorded_audio.wav');
-
-            // Upload the audio file to the server
-            fetch('/upload', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-                location.reload(); // Refresh to show updated files
-            })
-            .catch(error => {
-                console.error('Error uploading audio:', error);
-                alert('There was an issue uploading the audio. Please try again.');
-            });
-        };
+        console.log("Recording started...");
     } catch (error) {
-        // Handle errors, e.g., permission denied or microphone access issues
-        if (error.name === 'PermissionDeniedError') {
-            alert('Permission to access the microphone was denied. Please allow microphone access and try again.');
-        } else {
-            console.error('Error accessing microphone:', error);
-            alert('Unable to access your microphone. Please check your permissions.');
-        }
+        console.error('Microphone access denied:', error);
+        alert('Microphone access denied. Please enable permissions.');
     }
-}
-
-// Start recording when the record button is clicked
-recordButton.addEventListener('click', () => {
-    startRecording();
-    recordButton.disabled = true;
-    stopButton.disabled = false;
-    convertToTextButton.disabled = true;
 });
 
-// Stop recording when the stop button is clicked
+// **Stop Recording & Upload**
 stopButton.addEventListener('click', () => {
-    if (mediaRecorder) {
-        mediaRecorder.stop();
-    }
-
-    recordButton.disabled = false;
-    stopButton.disabled = true;
-    convertToTextButton.disabled = false;
-});
-
-// Handle text-to-speech conversion
-textToSpeechButton.addEventListener('click', () => {
-    const text = textInput.value.trim();
-    if (!text) {
-        alert("Please enter some text.");
+    if (!mediaRecorder) {
+        console.error("No active mediaRecorder!");
         return;
     }
 
-    // Show loading state
-    textToSpeechButton.disabled = true;
-    textToSpeechButton.textContent = 'Converting...';
+    mediaRecorder.stop();
+    clearInterval(timerInterval);
+    timerDisplay.textContent = "Processing...";
 
-    fetch('/text_to_speech', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ text: text })
-    })
-    .then(response => response.blob())
-    .then(audioBlob => {
-        // Play the generated audio
-        const audioUrl = URL.createObjectURL(audioBlob);
-        console.log('Audio URL:', audioUrl);
-        audioElement.src = audioUrl;
-        audioElement.play();
-    })
-    .catch(error => {
-        console.error('Error during text-to-speech conversion:', error);
-    })
-    .finally(() => {
-        // Reset button text and state
-        textToSpeechButton.disabled = false;
-        textToSpeechButton.textContent = 'Convert to Audio';
-    });
-});
-// Handle convert to text (transcribe recorded audio)
-convertToTextButton.addEventListener('click', () => {
-    fetch('/convert_to_text', {
-        method: 'POST',
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.transcription) {
-            alert('Transcription: ' + data.transcription);
-        } else {
-            alert('No transcription available.');
+    mediaRecorder.onstop = async () => {
+        console.log("Recording stopped, preparing upload...");
+
+        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' }); // ✅ WebM format
+        const formData = new FormData();
+        formData.append('audio_data', audioBlob, 'recorded_audio.webm'); // ✅ WebM filename
+
+        try {
+            const response = await fetch('/upload', { method: 'POST', body: formData });
+            const data = await response.json();
+
+            if (data.file) {
+                console.log("Upload successful:", data.file);
+
+                // ✅ **Fix: Display Correct Converted MP3**
+                const mp3File = data.file.replace('.wav', '.mp3').replace('.webm', '.mp3');
+                const newAudioItem = document.createElement('li');
+                newAudioItem.innerHTML = `
+                    <audio controls>
+                        <source src="/uploads/${mp3File}" type="audio/mp3">
+                        Your browser does not support the audio element.
+                    </audio>
+                    <br>${mp3File}`;
+                audioList.appendChild(newAudioItem);
+
+                // ✅ **Fix: Display Transcription**
+                if (data.transcription) {
+                    const newTranscriptItem = document.createElement('li');
+                    newTranscriptItem.innerHTML = `<a href="/uploads/${data.transcription}" target="_blank">${data.transcription}</a>`;
+                    transcriptionList.appendChild(newTranscriptItem);
+                }
+
+                // ✅ **Display Sentiment**
+                if (data.sentiment) {
+                    sentimentResultDisplay.textContent = `Sentiment: ${data.sentiment}`;
+                }
+
+                // ✅ **Link to Download Sentiment Analysis File**
+                const sentimentLink = document.createElement('a');
+                sentimentLink.href = `/uploads/${data.sentiment_file}`;
+                sentimentLink.target = '_blank';
+                sentimentLink.textContent = 'Download Sentiment Analysis';
+                sentimentResultDisplay.appendChild(sentimentLink);
+
+                timerDisplay.textContent = "Recording saved!";
+            } else {
+                throw new Error('Upload failed');
+            }
+        } catch (error) {
+            console.error('Error uploading audio:', error);
+            alert('Failed to upload audio.');
         }
-    })
-    .catch(error => {
-        console.error('Error during transcription:', error);
-        alert('There was an issue with transcription. Please try again.');
-    });
+    };
+
+    recordButton.disabled = false;
+    stopButton.disabled = true;
 });
+
+// **Handle Text-to-Speech**
+textToSpeechForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    const text = textInput.value.trim();
+
+    if (!text) {
+        alert("Please enter text to convert to speech.");
+        return;
+    }
+
+    try {
+        const response = await fetch('/text_to_speech', {
+            method: 'POST',
+            body: new FormData(textToSpeechForm)
+        });
+
+        const data = await response.json();
+
+        if (data.audio_file) {
+            console.log("TTS success:", data.audio_file);
+            ttsAudio.src = `/tts/${data.audio_file}`; // ✅ Fixed path to correct TTS folder
+            ttsAudio.play();
+
+            // ✅ **Display Sentiment from Text**
+            if (data.sentiment) {
+                sentimentResultDisplay.textContent = `Sentiment: ${data.sentiment}`;
+            }
+
+            // ✅ **Link to Download Sentiment Analysis File**
+            const sentimentLink = document.createElement('a');
+            sentimentLink.href = `/tts/${data.sentiment_file}`;
+            sentimentLink.target = '_blank';
+            sentimentLink.textContent = 'Download Sentiment Analysis';
+            sentimentResultDisplay.appendChild(sentimentLink);
+
+        } else {
+            alert('Text-to-Speech conversion failed.');
+        }
+    } catch (error) {
+        console.error('Text-to-Speech error:', error);
+        alert('Failed to process Text-to-Speech.');
+    }
+});
+
+// **Timer Format Helper**
+function formatTime(seconds) {
+    const minutes = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+}
