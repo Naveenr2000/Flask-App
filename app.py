@@ -1,195 +1,197 @@
 import os
-from google.cloud import speech, texttospeech
-import librosa
+import subprocess
 import soundfile as sf
 import noisereduce as nr
+from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, flash
 from werkzeug.utils import secure_filename
-from flask import request,Flask, session, request, render_template, send_from_directory, jsonify, redirect
+from google.cloud import speech, texttospeech, language_v1
 from datetime import datetime
-import warnings
-warnings.filterwarnings("ignore", category=FutureWarning)
 
 app = Flask(__name__)
-app.secret_key = 'AbcdEfgh1234'
+app.secret_key = "your_secret_key"
 
-# Configure upload folder and allowed extensions
+# ✅ Correctly set directories
 UPLOAD_FOLDER = 'uploads'
-ALLOWED_EXTENSIONS = {'wav', 'mp3'}
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+TTS_FOLDER = 'tts'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(TTS_FOLDER, exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['TTS_FOLDER'] = TTS_FOLDER
 
-# Google Cloud credentials and API clients - 
-# from google.oauth2 import service_account
-# credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "./project1-speech-to-text.json")
-# credentials = service_account.Credentials.from_service_account_file(credentials_path)
-# using IAM for deployement
-from google.auth import default
-from google.cloud import speech
+# ✅ Initialize Google Cloud Clients
+speech_client = speech.SpeechClient()
+tts_client = texttospeech.TextToSpeechClient()
+language_client = language_v1.LanguageServiceClient()
 
-credentials, project = default()
+ALLOWED_EXTENSIONS = {'wav', 'mp3', 'webm'}
 
-client = speech.SpeechClient(credentials=credentials)
-speech_client = speech.SpeechClient(credentials=credentials)
-text_to_speech_client = texttospeech.TextToSpeechClient(credentials=credentials)
-
-# Helper function to check allowed file extensions
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# Index route
-@app.route('/')
-def index():
-    if 'audio_files' not in session:
-        session['audio_files'] = []
-    if 'text_files' not in session:
-        session['text_files'] = []
-    return render_template('index.html', audio_files=session['audio_files'], text_files=session['text_files'])
+# ✅ Convert WebM to WAV
+def convert_webm_to_wav(input_path):
+    output_path = input_path.replace('.webm', '.wav')
+    try:
+        subprocess.run(['ffmpeg', '-i', input_path, '-ac', '1', '-ar', '16000', output_path], check=True)
+        os.remove(input_path)  # Remove WebM after conversion
+        return output_path
+    except Exception as e:
+        print(f"❌ WebM to WAV conversion failed: {e}")
+        return None
 
-# Route to upload and transcribe audio
+# ✅ Convert WAV to MP3
+def convert_wav_to_mp3(input_path):
+    output_path = input_path.replace('.wav', '.mp3')
+    try:
+        subprocess.run(['ffmpeg', '-i', input_path, '-ac', '1', '-ar', '16000', '-b:a', '128k', output_path], check=True)
+        return output_path
+    except Exception as e:
+        print(f"❌ WAV to MP3 conversion failed: {e}")
+        return None
+
+# ✅ Noise Reduction Function
+def reduce_noise(file_path):
+    try:
+        audio, sr = sf.read(file_path, dtype='float32')
+        if len(audio.shape) > 1:
+            audio = audio.mean(axis=1)  # Convert to mono
+        denoised_audio = nr.reduce_noise(y=audio, sr=sr, y_noise=audio[:sr])  # First sec noise sample
+        sf.write(file_path, denoised_audio, sr)
+    except Exception as e:
+        print(f"❌ Noise reduction failed: {e}")
+
+# ✅ Sentiment Analysis Function
+def analyze_sentiment(text):
+    client = language_v1.LanguageServiceClient()
+
+    # Construct the document
+    document = language_v1.Document(content=text, type_=language_v1.Document.Type.PLAIN_TEXT)
+
+    # Perform sentiment analysis
+    sentiment = client.analyze_sentiment(request={'document': document})
+
+    score = sentiment.document_sentiment.score
+    magnitude = sentiment.document_sentiment.magnitude
+
+    # Classify the sentiment based on score
+    if score > 0.25:
+        sentiment_label = "Positive"
+    elif score < -0.25:
+        sentiment_label = "Negative"
+    else:
+        sentiment_label = "Neutral"
+
+    return sentiment_label, score, magnitude
+
+# ✅ Upload & Convert Audio
 @app.route('/upload', methods=['POST'])
 def upload_audio():
     if 'audio_data' not in request.files:
-        return 'No file part', 400
+        return jsonify({'error': 'No audio file found'}), 400
+
     file = request.files['audio_data']
-    if file and allowed_file(file.filename):
-        filename = secure_filename(f"{datetime.now().strftime('%Y%m%d-%I%M%S%p')}.mp3")
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    if file.filename == '' or not allowed_file(file.filename):
+        return jsonify({'error': 'Invalid file type or no file selected'}), 400
 
-        # Save uploaded file
-        try:
-            file.save(file_path)
-        except Exception as e:
-            return jsonify({'error': f'Failed to save file: {e}'}), 500
+    filename = secure_filename(f"{datetime.now().strftime('%Y%m%d-%I%M%S%p')}.webm")
+    file_path = os.path.join(UPLOAD_FOLDER, filename)
+    file.save(file_path)
 
-        # # Perform noise reduction using librosa
-        # try:
-        #     # Load the audio file using librosa
-        #     audio, sample_rate = librosa.load(file_path, sr=None)
-        #     noise_sample = audio[:sample_rate]
-            
-        #     # Apply noise reduction (simple example using Spectral Subtraction)
-        #     noise_reduced_audio = nr.reduce_noise(y=audio, sr=sample_rate, y_noise=noise_sample)
+    # Convert WebM → WAV → MP3
+    file_path = convert_webm_to_wav(file_path)
+    if not file_path:
+        return jsonify({'error': 'Failed to process audio'}), 500
 
-        #     # Save the noise-reduced audio back to the file path
-        #     sf.write(file_path, noise_reduced_audio, sample_rate)
-        # except Exception as e:
-        #     return jsonify({'error': f'Noise reduction failed: {e}'}), 500
-        # Perform speech-to-text
-        try:
-            with open(file_path, 'rb') as audio_file:
-                content = audio_file.read()
-            audio = speech.RecognitionAudio(content=content)
-            config = speech.RecognitionConfig(
-                encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-                language_code="en-US"
-            )
-            response = speech_client.recognize(config=config, audio=audio)
-            
-            # Save transcription
-            transcription = "\n".join(result.alternatives[0].transcript for result in response.results)
-            transcription_file = f"{os.path.splitext(filename)[0]}.txt"
-            transcription_path = os.path.join(app.config['UPLOAD_FOLDER'], transcription_file)
-            with open(transcription_path, 'w') as f:
-                f.write(transcription)
+    reduce_noise(file_path)
+    mp3_path = convert_wav_to_mp3(file_path)
+    if not mp3_path:
+        return jsonify({'error': 'MP3 conversion failed'}), 500
 
-            # Update session
-            session['audio_files'].append(filename)
-            session['text_files'].append(transcription_file)
-            
-            return render_template('index.html', audio_files=session['audio_files'], text_files=session['text_files'])
-        except Exception as e:
-            return jsonify({'error': f'Speech-to-text failed: {e}'}), 500
+    # Perform Speech-to-Text
+    with open(file_path, 'rb') as audio_file:
+        content = audio_file.read()
+    audio = speech.RecognitionAudio(content=content)
+    config = speech.RecognitionConfig(
+        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+        sample_rate_hertz=16000,
+        language_code="en-US"
+    )
+    response = speech_client.recognize(config=config, audio=audio)
 
-    return jsonify({'error': 'Invalid file type'}), 400
+    if not response.results:
+        return jsonify({'error': 'No speech detected'}), 500
 
-# Route to convert text to speech
+    transcript = "\n".join(result.alternatives[0].transcript for result in response.results)
+    transcript_file = file_path.replace('.wav', '.txt')
+    with open(transcript_file, 'w') as f:
+        f.write(transcript)
+
+    # Perform Sentiment Analysis on the transcript
+    sentiment_label, score, magnitude = analyze_sentiment(transcript)
+
+    # Save the sentiment result
+    sentiment_file = transcript_file.replace('.txt', '_sentiment.txt')
+    with open(sentiment_file, 'w') as f:
+        f.write(f"Text: {transcript}\n")
+        f.write(f"Sentiment: {sentiment_label}\n")
+        f.write(f"Score: {score}\n")
+        f.write(f"Magnitude: {magnitude}\n")
+
+    return jsonify({
+        'file': os.path.basename(mp3_path),
+        'transcription': os.path.basename(transcript_file),
+        'sentiment': sentiment_label,
+        'sentiment_file': os.path.basename(sentiment_file)
+    }), 200
+
+# ✅ Text-to-Speech (Fix Upload & Serve)
 @app.route('/text_to_speech', methods=['POST'])
 def text_to_speech():
-    text = request.form.get('text')
+    text = request.form.get('text', '')
     if not text:
-        return 'No text provided', 400
+        return jsonify({'error': 'No text provided'}), 400
 
-    # Convert text to speech
+    # Perform Sentiment Analysis on the text
+    sentiment_label, score, magnitude = analyze_sentiment(text)
+
     input_text = texttospeech.SynthesisInput(text=text)
-    voice = texttospeech.VoiceSelectionParams(
-        language_code="en-US",
-        ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL
-    )
-    audio_config = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.LINEAR16)
+    voice = texttospeech.VoiceSelectionParams(language_code="en-US", ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL)
+    audio_config = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.MP3)
 
-    try:
-        response = text_to_speech_client.synthesize_speech(input=input_text, voice=voice, audio_config=audio_config)
-        filename = secure_filename(f"tts_{datetime.now().strftime('%Y%m%d-%I%M%S%p')}.wav")
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        with open(file_path, 'wb') as out:
-            out.write(response.audio_content)
+    response = tts_client.synthesize_speech(input=input_text, voice=voice, audio_config=audio_config)
 
-        # Generate  transcription (or extract any relevant info if needed)
-        transcription_file = f"{os.path.splitext(filename)[0]}.txt"
-        transcription_path = os.path.join(app.config['UPLOAD_FOLDER'], transcription_file)
-        with open(transcription_path, 'w') as f:
-            f.write(f"Text-to-speech transcription for file: {filename}\n")
-            f.write(f"Original text: {text}")
+    output_filename = f"tts_{datetime.now().strftime('%Y%m%d-%I%M%S%p')}.mp3"
+    output_path = os.path.join(TTS_FOLDER, output_filename)
 
-        # Update session
-        session['audio_files'].append(filename)
-        session['text_files'].append(transcription_file)
-        
-        return render_template('index.html', audio_files=session['audio_files'], text_files=session['text_files'])
-    except Exception as e:
-        return jsonify({'error': f'Text-to-speech failed: {e}'}), 500
+    with open(output_path, 'wb') as output_file:
+        output_file.write(response.audio_content)
 
-    return redirect('/')
+    # Save the sentiment result
+    sentiment_file = output_filename.replace('.mp3', '_sentiment.txt')
+    with open(os.path.join(TTS_FOLDER, sentiment_file), 'w') as f:
+        f.write(f"Text: {text}\n")
+        f.write(f"Sentiment: {sentiment_label}\n")
+        f.write(f"Score: {score}\n")
+        f.write(f"Magnitude: {magnitude}\n")
 
-# Route to serve uploaded files
+    return jsonify({'audio_file': output_filename, 'sentiment_file': sentiment_file})
+
+# ✅ Serve Audio from Correct Paths
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
-    if filename.endswith('.wav'):
-        return send_from_directory(app.config['UPLOAD_FOLDER'], filename, as_attachment=False, mimetype='audio/wav')
-    elif filename.endswith('.mp3'):
-        return send_from_directory(app.config['UPLOAD_FOLDER'], filename, as_attachment=False, mimetype='audio/mpeg')
-    else:
-        return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+    return send_from_directory(UPLOAD_FOLDER, filename)
 
-@app.route('/convert_to_text', methods=['POST'])
-def convert_to_text():
-    # Assuming the last uploaded file is the recorded audio
-    if not session.get('audio_files'):
-        return jsonify({'error': 'No audio file to transcribe'}), 400
+@app.route('/tts/<filename>')
+def tts_file(filename):
+    return send_from_directory(TTS_FOLDER, filename)
 
-    audio_file = session['audio_files'][-1]  # Get the last uploaded file
-
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], audio_file)
-    try:
-        with open(file_path, 'rb') as audio_file_data:
-            content = audio_file_data.read()
-
-        audio = speech.RecognitionAudio(content=content)
-        config = speech.RecognitionConfig(
-            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-            language_code="en-US"
-        )
-        response = speech_client.recognize(config=config, audio=audio)
-
-        # Extract transcription from response
-        transcription = "\n".join(result.alternatives[0].transcript for result in response.results)
-
-                # Create transcription file
-        transcription_file = f"{os.path.splitext(audio_file)[0]}.txt"
-        transcription_path = os.path.join(app.config['UPLOAD_FOLDER'], transcription_file)
-        with open(transcription_path, 'w') as f:
-            f.write(transcription)
-
-        # Update session
-        session['text_files'].append(transcription_file)
-
-        # Return transcription as JSON
-        return jsonify({'transcription': transcription})
-
-    except Exception as e:
-        return jsonify({'error': f'Error processing audio: {e}'}), 500
-
-
+# ✅ Home Page
+@app.route('/')
+def index():
+    audio_files = [f for f in os.listdir(UPLOAD_FOLDER) if f.endswith('.mp3')]
+    text_files = [f for f in os.listdir(UPLOAD_FOLDER) if f.endswith('.txt')]
+    tts_files = [f for f in os.listdir(TTS_FOLDER) if f.endswith('.mp3')]
+    return render_template('index.html', audio_files=audio_files, text_files=text_files, tts_files=tts_files)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
+    app.run(debug=True)
