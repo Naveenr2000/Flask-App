@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Speech-to-Text and Text-to-Speech</title>
+    <title>Speech-to-Text and Sentiment Analysis</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -29,10 +29,6 @@
         button:hover {
             background: orange;
         }
-        textarea {
-            width: 80%;
-            padding: 10px;
-        }
         #timer {
             font-size: 18px;
             margin-top: 10px;
@@ -52,11 +48,10 @@
     </style>
 </head>
 <body>
-
 <div class="container">
-    <h1>Speech-to-Text and Text-to-Speech</h1>
+    <h1>Speech-to-Text and Sentiment Analysis</h1>
 
-    <!-- ✅ Recording Section -->
+    <!-- Recording Section -->
     <h2>Record and Upload Audio</h2>
     <button id="record">Record</button>
     <button id="stop" disabled>Stop</button>
@@ -64,15 +59,7 @@
     <p id="status"></p>
     <audio id="audio" controls></audio>
 
-    <!-- ✅ Text-to-Speech Section -->
-    <h2>Text-to-Speech</h2>
-    <form id="textToSpeechForm">
-        <textarea id="textInput" name="text" rows="4" placeholder="Enter text here"></textarea><br>
-        <button type="submit">Convert to Audio</button>
-    </form>
-    <audio id="ttsAudio" controls></audio>
-
-    <!-- ✅ Recorded Audio List (MP3 Format) -->
+    <!-- Recorded Audio Files -->
     <h2>Recorded Audio Files</h2>
     <ul id="audioList">
         {% for file in audio_files %}
@@ -86,21 +73,15 @@
         {% endfor %}
     </ul>
 
-    <!-- ✅ Transcription List -->
-    <h2>Transcriptions</h2>
-    <ul id="transcriptionList">
-        {% for file in text_files %}
+    <!-- History Files (Combined Transcription & Sentiment) -->
+    <h2>History Files (Transcription & Sentiment)</h2>
+    <ul id="historyList">
+        {% for file in history_files %}
             <li>
                 <a href="{{ url_for('uploaded_file', filename=file) }}" target="_blank">{{ file }}</a>
             </li>
         {% endfor %}
     </ul>
-
-    <!-- ✅ Sentiment Analysis Section -->
-    <h2>Sentiment Analysis</h2>
-    <div id="sentimentResult">
-        <!-- Sentiment result and download link will be added here dynamically -->
-    </div>  <!-- Section to display the sentiment result -->
 </div>
 
 <script src="/static/script.js"></script>
