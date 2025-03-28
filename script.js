@@ -1,26 +1,20 @@
 const recordButton = document.getElementById('record');
 const stopButton = document.getElementById('stop');
-const audioElement = document.getElementById('audio');
-const textToSpeechForm = document.getElementById('textToSpeechForm');
-const textInput = document.getElementById('textInput');
-const ttsAudio = document.getElementById('ttsAudio');
 const timerDisplay = document.getElementById('timer');
 const audioList = document.getElementById('audioList');
-const transcriptionList = document.getElementById('transcriptionList');
-const sentimentResultDisplay = document.getElementById('sentimentResult');  // New element to display sentiment
+const historyList = document.getElementById('historyList');
 
 let mediaRecorder;
 let audioChunks = [];
 let startTime;
 let timerInterval;
 
-// ✅ **Fixing Microphone Issue**: Use WebM format
+// Start Recording Audio
 recordButton.addEventListener('click', async () => {
     try {
         console.log("Requesting microphone access...");
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" }); // ✅ WebM for better browser support
-
+        mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
         audioChunks = [];
         mediaRecorder.ondataavailable = event => {
             audioChunks.push(event.data);
@@ -36,7 +30,6 @@ recordButton.addEventListener('click', async () => {
         recordButton.disabled = true;
         stopButton.disabled = false;
         timerDisplay.textContent = "Recording...";
-
         console.log("Recording started...");
     } catch (error) {
         console.error('Microphone access denied:', error);
@@ -44,7 +37,7 @@ recordButton.addEventListener('click', async () => {
     }
 });
 
-// **Stop Recording & Upload**
+// Stop Recording & Upload
 stopButton.addEventListener('click', () => {
     if (!mediaRecorder) {
         console.error("No active mediaRecorder!");
@@ -57,10 +50,9 @@ stopButton.addEventListener('click', () => {
 
     mediaRecorder.onstop = async () => {
         console.log("Recording stopped, preparing upload...");
-
-        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' }); // ✅ WebM format
+        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
         const formData = new FormData();
-        formData.append('audio_data', audioBlob, 'recorded_audio.webm'); // ✅ WebM filename
+        formData.append('audio_data', audioBlob, 'recorded_audio.webm');
 
         try {
             const response = await fetch('/upload', { method: 'POST', body: formData });
@@ -69,7 +61,7 @@ stopButton.addEventListener('click', () => {
             if (data.file) {
                 console.log("Upload successful:", data.file);
 
-                // ✅ **Fix: Display Correct Converted MP3**
+                // Use the returned file name to display the MP3 file
                 const mp3File = data.file.replace('.wav', '.mp3').replace('.webm', '.mp3');
                 const newAudioItem = document.createElement('li');
                 newAudioItem.innerHTML = `
@@ -80,24 +72,12 @@ stopButton.addEventListener('click', () => {
                     <br>${mp3File}`;
                 audioList.appendChild(newAudioItem);
 
-                // ✅ **Fix: Display Transcription**
-                if (data.transcription) {
-                    const newTranscriptItem = document.createElement('li');
-                    newTranscriptItem.innerHTML = `<a href="/uploads/${data.transcription}" target="_blank">${data.transcription}</a>`;
-                    transcriptionList.appendChild(newTranscriptItem);
+                // Display the combined history file (transcription & sentiment)
+                if (data.history_file) {
+                    const newHistoryItem = document.createElement('li');
+                    newHistoryItem.innerHTML = `<a href="/uploads/${data.history_file}" target="_blank">${data.history_file}</a>`;
+                    historyList.appendChild(newHistoryItem);
                 }
-
-                // ✅ **Display Sentiment**
-                if (data.sentiment) {
-                    sentimentResultDisplay.textContent = `Sentiment: ${data.sentiment}`;
-                }
-
-                // ✅ **Link to Download Sentiment Analysis File**
-                const sentimentLink = document.createElement('a');
-                sentimentLink.href = `/uploads/${data.sentiment_file}`;
-                sentimentLink.target = '_blank';
-                sentimentLink.textContent = 'Download Sentiment Analysis';
-                sentimentResultDisplay.appendChild(sentimentLink);
 
                 timerDisplay.textContent = "Recording saved!";
             } else {
@@ -113,52 +93,7 @@ stopButton.addEventListener('click', () => {
     stopButton.disabled = true;
 });
 
-// **Handle Text-to-Speech**
-textToSpeechForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-
-    const text = textInput.value.trim();
-
-    if (!text) {
-        alert("Please enter text to convert to speech.");
-        return;
-    }
-
-    try {
-        const response = await fetch('/text_to_speech', {
-            method: 'POST',
-            body: new FormData(textToSpeechForm)
-        });
-
-        const data = await response.json();
-
-        if (data.audio_file) {
-            console.log("TTS success:", data.audio_file);
-            ttsAudio.src = `/tts/${data.audio_file}`; // ✅ Fixed path to correct TTS folder
-            ttsAudio.play();
-
-            // ✅ **Display Sentiment from Text**
-            if (data.sentiment) {
-                sentimentResultDisplay.textContent = `Sentiment: ${data.sentiment}`;
-            }
-
-            // ✅ **Link to Download Sentiment Analysis File**
-            const sentimentLink = document.createElement('a');
-            sentimentLink.href = `/tts/${data.sentiment_file}`;
-            sentimentLink.target = '_blank';
-            sentimentLink.textContent = 'Download Sentiment Analysis';
-            sentimentResultDisplay.appendChild(sentimentLink);
-
-        } else {
-            alert('Text-to-Speech conversion failed.');
-        }
-    } catch (error) {
-        console.error('Text-to-Speech error:', error);
-        alert('Failed to process Text-to-Speech.');
-    }
-});
-
-// **Timer Format Helper**
+// Helper function to format elapsed time
 function formatTime(seconds) {
     const minutes = Math.floor(seconds / 60);
     const secs = seconds % 60;
