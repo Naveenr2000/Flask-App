@@ -1,89 +1,86 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Speech-to-Text and Sentiment Analysis</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-            background-color: #f4f4f4;
-        }
-        .container {
-            width: 60%;
-            margin: auto;
-            background: white;
-            padding: 20px;
-            border-radius: 5px;
-            box-shadow: 2px 2px 10px gray;
-        }
-        button {
-            padding: 10px 15px;
-            border: none;
-            background: #4CAF50;
-            color: white;
-            cursor: pointer;
-            margin: 5px;
-        }
-        button:hover {
-            background: orange;
-        }
-        #timer {
-            font-size: 18px;
-            margin-top: 10px;
-        }
-        #status {
-            font-size: 16px;
-            font-weight: bold;
-            margin-top: 10px;
-            color: blue;
-        }
-        #sentimentResult {
-            font-size: 18px;
-            margin-top: 20px;
-            color: blue;
-            font-weight: bold;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Book Knowledge App</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background-color: #f4f4f4;
+    }
+    .container {
+      width: 60%;
+      margin: auto;
+      background: #fff;
+      padding: 20px;
+      border-radius: 5px;
+      box-shadow: 2px 2px 10px gray;
+    }
+    button {
+      padding: 10px 15px;
+      border: none;
+      background: #4CAF50;
+      color: white;
+      cursor: pointer;
+      margin: 5px;
+    }
+    button:hover {
+      background: orange;
+    }
+    #timer {
+      font-size: 18px;
+      margin-top: 10px;
+    }
+    /* Style for conversation history */
+    #conversationHistory {
+      text-align: left;
+      margin-top: 20px;
+      border: 1px solid #ddd;
+      padding: 10px;
+      max-height: 300px;
+      overflow-y: scroll;
+    }
+    #conversationHistory li {
+      margin-bottom: 10px;
+      padding-bottom: 10px;
+      border-bottom: 1px dashed #ccc;
+    }
+  </style>
 </head>
 <body>
-<div class="container">
-    <h1>Speech-to-Text and Sentiment Analysis</h1>
+  <div class="container">
+    <h1>Book Knowledge App</h1>
 
-    <!-- Recording Section -->
-    <h2>Record and Upload Audio</h2>
-    <button id="record">Record</button>
-    <button id="stop" disabled>Stop</button>
+    <!-- PDF Book Upload Form -->
+    <h2>Upload a Book (PDF)</h2>
+    <form id="pdfUploadForm" action="/upload_pdf" method="POST" enctype="multipart/form-data">
+      <input type="file" name="bookPdf" accept="application/pdf" required>
+      <button type="submit">Upload Book</button>
+    </form>
+
+    <hr>
+
+    <!-- Audio Question Section -->
+    <h2>Ask a Question about the Book</h2>
+    <button id="record">Record Question</button>
+    <button id="stop" disabled>Stop Recording</button>
     <p id="timer">00:00</p>
-    <p id="status"></p>
-    <audio id="audio" controls></audio>
 
-    <!-- Recorded Audio Files -->
-    <h2>Recorded Audio Files</h2>
-    <ul id="audioList">
-        {% for file in audio_files %}
-            <li>
-                <audio controls>
-                    <source src="{{ url_for('uploaded_file', filename=file) }}" type="audio/mp3">
-                    Your browser does not support the audio element.
-                </audio>
-                <br>{{ file }}
-            </li>
-        {% endfor %}
+    <!-- Answers Display -->
+    <h2>Answers</h2>
+    <ul id="answerList"></ul>
+
+    <!-- Conversation History Display -->
+    <h2>Conversation History</h2>
+    <ul id="conversationHistory">
+      {% for entry in conversation_history %}
+      <li><pre>{{ entry }}</pre></li>
+      {% endfor %}
     </ul>
+  </div>
 
-    <!-- History Files (Combined Transcription & Sentiment) -->
-    <h2>History Files (Transcription & Sentiment)</h2>
-    <ul id="historyList">
-        {% for file in history_files %}
-            <li>
-                <a href="{{ url_for('uploaded_file', filename=file) }}" target="_blank">{{ file }}</a>
-            </li>
-        {% endfor %}
-    </ul>
-</div>
-
-<script src="/static/script.js"></script>
+  <script src="/static/script.js"></script>
 </body>
 </html>
